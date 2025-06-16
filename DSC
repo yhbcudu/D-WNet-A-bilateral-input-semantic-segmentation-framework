@@ -45,26 +45,4 @@ class OpticalImageProcessingNetwork(nn.Module):
         return x
 
 
-class ConvLSTMCell(nn.Module):
-    def __init__(self, input_size, hidden_size, kernel_size=3):
-        super(ConvLSTMCell, self).__init__()
-        self.hidden_size = hidden_size
-        self.kernel_size = kernel_size
-        self.conv = nn.Conv2d(input_size + hidden_size, 4 * hidden_size, kernel_size=kernel_size, padding=1)
 
-    def forward(self, x, h_prev, c_prev):
-        combined = torch.cat([x, h_prev], dim=1)
-        conv_output = self.conv(combined)
-
-        # 分离输出
-        i, f, o, g = torch.split(conv_output, self.hidden_size, dim=1)
-
-        # LSTM公式
-        i = torch.sigmoid(i)
-        f = torch.sigmoid(f)
-        o = torch.sigmoid(o)
-        g = torch.tanh(g)
-
-        c = f * c_prev + i * g
-        h = o * torch.tanh(c)
-        return h, c
