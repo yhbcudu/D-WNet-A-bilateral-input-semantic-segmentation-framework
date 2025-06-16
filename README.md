@@ -1,5 +1,6 @@
 # Dual-Branch D-WNet: Joint Optical and Time-Series SAR Fusion for Remote Sensing Classification
 
+![image](https://github.com/user-attachments/assets/a0632f11-a607-431f-9ea1-a94cfe683025)
 This project presents the **D-WNet** framework, a deep learning model designed for joint classification of optical and SAR time-series imagery for remote sensing applications. D-WNet efficiently integrates multi-source data to improve classification accuracy, particularly in environments with challenging conditions such as cloud cover, fog, and complex land cover changes.
 
 ## Overview
@@ -14,9 +15,9 @@ D-WNet uses a dual-branch architecture to process optical images and time-series
   
 
 
-![image](https://github.com/user-attachments/assets/a0632f11-a607-431f-9ea1-a94cfe683025)
 
-![image](https://github.com/user-attachments/assets/318a4ad8-fbeb-4069-a906-6089eddcee43)
+
+
 
 
 Usage
@@ -45,13 +46,9 @@ Each dataset includes a combination of Sentinel-1 SAR time-series data and Senti
 
 Model Performance
 The D-WNet model has shown significant improvements in classification accuracy, particularly in complex environments with cloud cover and diverse land cover types. The model has been evaluated with:
-
+![image](https://github.com/user-attachments/assets/318a4ad8-fbeb-4069-a906-6089eddcee43)
 Overall Classification Accuracy (OA): 86.58% (Zaling Lake)
 
 Kappa Coefficient: 0.8292 (Zaling Lake)
 
 
-
-Jiaqi Ye: Model validation, visualization.
-
-Liang Li: Model validation, visualization.
