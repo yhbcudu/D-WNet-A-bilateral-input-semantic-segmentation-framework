@@ -1,0 +1,64 @@
+class ConvLSTM(nn.Module):
+    def __init__(self, input_channels, hidden_channels, kernel_size=3):
+        super(ConvLSTM, self).__init__()
+        self.hidden_channels = hidden_channels
+        self.kernel_size = kernel_size
+        self.cell = ConvLSTMCell(input_channels, hidden_channels, kernel_size)
+
+    def forward(self, x):
+        batch_size, seq_len, c, h, w = x.size()
+        h_prev = torch.zeros(batch_size, self.hidden_channels, h, w).to(x.device)
+        c_prev = torch.zeros(batch_size, self.hidden_channels, h, w).to(x.device)
+
+        output_seq = []
+        for t in range(seq_len):
+            h_prev, c_prev = self.cell(x[:, t, :, :, :], h_prev, c_prev)
+            output_seq.append(h_prev)
+
+        output_seq = torch.stack(output_seq, dim=1)
+        return output_seq
+
+
+
+class ConvLSTMEncoderBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3):
+        super(ConvLSTMEncoderBlock, self).__init__()
+        self.conv_lstm = ConvLSTM(in_channels, out_channels, kernel_size)
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+
+    def forward(self, x):
+
+        batch_size, seq_len, c, h, w = x.size()
+
+
+        x = self.conv_lstm(x)
+
+        pooled_output = []
+        for t in range(seq_len):
+            pooled_output.append(self.pool(x[:, t, :, :, :]))
+
+        pooled_output = torch.stack(pooled_output, dim=1)
+
+        return pooled_output
+
+
+
+class SARImageProcessingNetwork(nn.Module):
+    def __init__(self, in_channels=1, seq_len=12, out_channels=1024):
+        super(SARImageProcessingNetwork, self).__init__()
+
+        # 初始化 ConvLSTM 编码器块
+        self.encoder1 = ConvLSTMEncoderBlock(in_channels, 64)
+        self.encoder2 = ConvLSTMEncoderBlock(64, 128)
+        self.encoder3 = ConvLSTMEncoderBlock(128, 256)
+        self.encoder4 = ConvLSTMEncoderBlock(256, 512)
+        self.encoder5 = ConvLSTMEncoderBlock(512, out_channels)
+
+    def forward(self, x):
+        x = self.encoder1(x)
+        x = self.encoder2(x)
+        x = self.encoder3(x)
+        x = self.encoder4(x)
+        x = self.encoder5(x)
+
+        return x
