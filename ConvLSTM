@@ -47,7 +47,6 @@ class SARImageProcessingNetwork(nn.Module):
     def __init__(self, in_channels=1, seq_len=12, out_channels=1024):
         super(SARImageProcessingNetwork, self).__init__()
 
-        # 初始化 ConvLSTM 编码器块
         self.encoder1 = ConvLSTMEncoderBlock(in_channels, 64)
         self.encoder2 = ConvLSTMEncoderBlock(64, 128)
         self.encoder3 = ConvLSTMEncoderBlock(128, 256)
