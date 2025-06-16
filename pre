@@ -1,0 +1,46 @@
+import os
+import numpy as np
+import rasterio
+
+
+def preprocess_and_save(sar_dir, optical_dir, labels_dir, output_dir, num_months):
+    os.makedirs(output_dir, exist_ok=True)
+    sar_output_dir = os.path.join(output_dir, 'sar')
+    optical_output_dir = os.path.join(output_dir, 'optical')
+    labels_output_dir = os.path.join(output_dir, 'labels')
+
+    os.makedirs(sar_output_dir, exist_ok=True)
+    os.makedirs(optical_output_dir, exist_ok=True)
+    os.makedirs(labels_output_dir, exist_ok=True)
+
+    indices = [f.split('.')[0] for f in os.listdir(os.path.join(sar_dir, '1'))]
+
+    for index in indices:
+        sar_batch = np.empty((num_months, 64, 64))
+        for month in range(1, num_months + 1):
+            sar_path = os.path.join(sar_dir, str(month), f"{index}.tif")
+            with rasterio.open(sar_path) as src:
+                sar_img = src.read(1) / 255.0
+                sar_batch[month - 1] = sar_img
+
+        optical_path = os.path.join(optical_dir, f"{index}.tif")
+        with rasterio.open(optical_path) as src:
+            optical_img = src.read([1, 2, 3, 4]) / 255.0
+
+        label_path = os.path.join(labels_dir, f"{index}.tif")
+        with rasterio.open(label_path) as src:
+            label_img = src.read(1).astype(int)
+
+        # Save preprocessed data separately
+        np.savez_compressed(os.path.join(sar_output_dir, f"{index}.npz"), sar=sar_batch)
+        np.savez_compressed(os.path.join(optical_output_dir, f"{index}.npz"), optical=optical_img)
+        np.savez_compressed(os.path.join(labels_output_dir, f"{index}.npz"), label=label_img)
+
+
+if __name__ == '__main__':
+    sar_dir = r'D:\data\扎陵湖影像与标签\裁剪影像\64大小\train\time'
+    optical_dir = r'D:\data\扎陵湖影像与标签\裁剪影像\64大小\train\4band'
+    labels_dir = r'D:\data\扎陵湖影像与标签\裁剪影像\64大小\train\lable'
+    output_dir = r'D:\data\扎陵湖影像与标签\pytorch训练\preprocessed'
+    num_months = 12
+    preprocess_and_save(sar_dir, optical_dir, labels_dir, output_dir, num_months)
