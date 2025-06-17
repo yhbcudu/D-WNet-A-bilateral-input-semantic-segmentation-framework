@@ -8,26 +8,35 @@ class DepthwiseSeparableConv(nn.Module):
         super(DepthwiseSeparableConv, self).__init__()
         self.depthwise = nn.Conv2d(in_channels, in_channels, kernel_size=kernel_size, stride=stride,
                                    padding=padding, groups=in_channels)
-
         self.pointwise = nn.Conv2d(in_channels, out_channels, kernel_size=1)
 
     def forward(self, x):
+        print(f"  DepthwiseSeparableConv input: {x.shape}")
         x = self.depthwise(x)
+        print(f"  After depthwise conv: {x.shape}")
         x = self.pointwise(x)
+        print(f"  After pointwise conv: {x.shape}")
         return x
 
 
-class UNetEncoderBlock(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super(UNetEncoderBlock, self).__init__()
+class OpticalEncoderBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, use_pooling=True):
+        super(OpticalEncoderBlock, self).__init__()
         self.conv1 = DepthwiseSeparableConv(in_channels, out_channels, kernel_size=3, padding=1)
         self.conv2 = DepthwiseSeparableConv(out_channels, out_channels, kernel_size=3, padding=1)
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.use_pooling = use_pooling
+        if use_pooling:
+            self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
     def forward(self, x):
+        print(f"OpticalEncoderBlock input: {x.shape}")
         x = F.relu(self.conv1(x))
+        print(f"After conv1 + relu: {x.shape}")
         x = F.relu(self.conv2(x))
-        x = self.pool(x)
+        print(f"After conv2 + relu: {x.shape}")
+        if self.use_pooling:
+            x = self.pool(x)
+            print(f"After pooling: {x.shape}")
         return x
 
 
@@ -35,18 +44,36 @@ class OpticalImageProcessingNetwork(nn.Module):
     def __init__(self, in_channels=4, out_channels=1024):
         super(OpticalImageProcessingNetwork, self).__init__()
 
-        self.encoder1 = UNetEncoderBlock(in_channels, 64)
-        self.encoder2 = UNetEncoderBlock(64, 128)
-        self.encoder3 = UNetEncoderBlock(128, 256)
-        self.encoder4 = UNetEncoderBlock(256, 512)
-        self.encoder5 = UNetEncoderBlock(512, 1024)
+        self.encoder1 = OpticalEncoderBlock(in_channels, 64, use_pooling=True)  # 64->32
+        self.encoder2 = OpticalEncoderBlock(64, 128, use_pooling=True)  # 32->16
+        self.encoder3 = OpticalEncoderBlock(128, 256, use_pooling=False)  # 16->16
+        self.encoder4 = OpticalEncoderBlock(256, 512, use_pooling=False)  # 16->16
+        self.encoder5 = OpticalEncoderBlock(512, 1024, use_pooling=False)  # 16->16
+
+        self.upsample = nn.Upsample(size=(64, 64), mode='bilinear', align_corners=False)
 
     def forward(self, x):
+        print(f"\n=== OpticalImageProcessingNetwork ===")
+        print(f"Input to optical network: {x.shape}")
+
+        print("\n--- Encoder 1 ---")
         x = self.encoder1(x)
+
+        print("\n--- Encoder 2 ---")
         x = self.encoder2(x)
+
+        print("\n--- Encoder 3 ---")
         x = self.encoder3(x)
+
+        print("\n--- Encoder 4 ---")
         x = self.encoder4(x)
+
+        print("\n--- Encoder 5 ---")
         x = self.encoder5(x)
+
+        print(f"Before upsample: {x.shape}")
+        x = self.upsample(x)
+        print(f"OpticalImageProcessingNetwork output: {x.shape}")
         return x
 
 
@@ -58,11 +85,14 @@ class ConvLSTMCell(nn.Module):
         self.conv = nn.Conv2d(input_size + hidden_size, 4 * hidden_size, kernel_size=kernel_size, padding=1)
 
     def forward(self, x, h_prev, c_prev):
+        print(f"    ConvLSTMCell - x: {x.shape}, h_prev: {h_prev.shape}, c_prev: {c_prev.shape}")
         combined = torch.cat([x, h_prev], dim=1)
+        print(f"    Combined shape: {combined.shape}")
         conv_output = self.conv(combined)
-
+        print(f"    Conv output shape: {conv_output.shape}")
 
         i, f, o, g = torch.split(conv_output, self.hidden_size, dim=1)
+        print(f"    Split shapes - i: {i.shape}, f: {f.shape}, o: {o.shape}, g: {g.shape}")
 
         i = torch.sigmoid(i)
         f = torch.sigmoid(f)
@@ -71,6 +101,7 @@ class ConvLSTMCell(nn.Module):
 
         c = f * c_prev + i * g
         h = o * torch.tanh(c)
+        print(f"    Output - h: {h.shape}, c: {c.shape}")
         return h, c
 
 
@@ -82,75 +113,116 @@ class ConvLSTM(nn.Module):
         self.cell = ConvLSTMCell(input_channels, hidden_channels, kernel_size)
 
     def forward(self, x):
+        print(f"  ConvLSTM input: {x.shape}")
         batch_size, seq_len, c, h, w = x.size()
+        print(f"  Batch: {batch_size}, Seq: {seq_len}, Channels: {c}, H: {h}, W: {w}")
+
         h_prev = torch.zeros(batch_size, self.hidden_channels, h, w).to(x.device)
         c_prev = torch.zeros(batch_size, self.hidden_channels, h, w).to(x.device)
+        print(f"  Initial hidden states - h_prev: {h_prev.shape}, c_prev: {c_prev.shape}")
 
         output_seq = []
         for t in range(seq_len):
+            print(f"  Processing timestep {t}")
             h_prev, c_prev = self.cell(x[:, t, :, :, :], h_prev, c_prev)
             output_seq.append(h_prev)
 
         output_seq = torch.stack(output_seq, dim=1)
+        print(f"  ConvLSTM output: {output_seq.shape}")
         return output_seq
 
 
-
-class ConvLSTMEncoderBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3):
-        super(ConvLSTMEncoderBlock, self).__init__()
+class SAREncoderBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, use_pooling=True, kernel_size=3):
+        super(SAREncoderBlock, self).__init__()
         self.conv_lstm = ConvLSTM(in_channels, out_channels, kernel_size)
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.use_pooling = use_pooling
+        if use_pooling:
+            self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
     def forward(self, x):
-
+        print(f"SAREncoderBlock input: {x.shape}")
         batch_size, seq_len, c, h, w = x.size()
-
+        print(f"Dimensions - Batch: {batch_size}, Seq: {seq_len}, Channels: {c}, H: {h}, W: {w}")
 
         x = self.conv_lstm(x)
+        print(f"After ConvLSTM: {x.shape}")
 
-        pooled_output = []
-        for t in range(seq_len):
-            pooled_output.append(self.pool(x[:, t, :, :, :]))
-
-        pooled_output = torch.stack(pooled_output, dim=1)
-
-        return pooled_output
-
+        if self.use_pooling:
+            pooled_output = []
+            for t in range(seq_len):
+                pooled = self.pool(x[:, t, :, :, :])
+                print(f"Timestep {t} after pooling: {pooled.shape}")
+                pooled_output.append(pooled)
+            pooled_output = torch.stack(pooled_output, dim=1)
+            print(f"SAREncoderBlock output: {pooled_output.shape}")
+            return pooled_output
+        else:
+            print(f"SAREncoderBlock output (no pooling): {x.shape}")
+            return x
 
 
 class SARImageProcessingNetwork(nn.Module):
     def __init__(self, in_channels=1, seq_len=12, out_channels=1024):
         super(SARImageProcessingNetwork, self).__init__()
 
-        self.encoder1 = ConvLSTMEncoderBlock(in_channels, 64)
-        self.encoder2 = ConvLSTMEncoderBlock(64, 128)
-        self.encoder3 = ConvLSTMEncoderBlock(128, 256)
-        self.encoder4 = ConvLSTMEncoderBlock(256, 512)
-        self.encoder5 = ConvLSTMEncoderBlock(512, out_channels)
+        self.encoder1 = SAREncoderBlock(in_channels, 64, use_pooling=True)  # 64->32
+        self.encoder2 = SAREncoderBlock(64, 128, use_pooling=True)  # 32->16
+        self.encoder3 = SAREncoderBlock(128, 256, use_pooling=False)  # 16->16
+        self.encoder4 = SAREncoderBlock(256, 512, use_pooling=False)  # 16->16
+        self.encoder5 = SAREncoderBlock(512, out_channels, use_pooling=False)  # 16->16
+
+        self.upsample = nn.Upsample(size=(64, 64), mode='bilinear', align_corners=False)
 
     def forward(self, x):
+        print(f"\n=== SARImageProcessingNetwork ===")
+        print(f"Input to SAR network: {x.shape}")
+
+        print("\n--- SAR Encoder 1 ---")
         x = self.encoder1(x)
+
+        print("\n--- SAR Encoder 2 ---")
         x = self.encoder2(x)
+
+        print("\n--- SAR Encoder 3 ---")
         x = self.encoder3(x)
+
+        print("\n--- SAR Encoder 4 ---")
         x = self.encoder4(x)
+
+        print("\n--- SAR Encoder 5 ---")
         x = self.encoder5(x)
 
-        return x
+        print(f"Before upsample: {x.shape}")
+        # 对每个时间步分别上采样
+        batch_size, seq_len, channels, h, w = x.size()
+        upsampled_output = []
+        for t in range(seq_len):
+            upsampled = self.upsample(x[:, t, :, :, :])
+            print(f"Timestep {t} after upsample: {upsampled.shape}")
+            upsampled_output.append(upsampled)
+
+        upsampled_output = torch.stack(upsampled_output, dim=1)
+        print(f"SARImageProcessingNetwork output: {upsampled_output.shape}")
+        return upsampled_output
 
 
 class DenseBlock(nn.Module):
     def __init__(self, in_channels, growth_rate, num_layers):
         super(DenseBlock, self).__init__()
         self.layers = nn.ModuleList()
-        for _ in range(num_layers):
-            self.layers.append(nn.Conv2d(in_channels, growth_rate, kernel_size=3, padding=1))
-            in_channels += growth_rate
+        current_channels = in_channels
+        for i in range(num_layers):
+            self.layers.append(nn.Conv2d(current_channels, growth_rate, kernel_size=3, padding=1))
+            current_channels += growth_rate
 
     def forward(self, x):
-        for layer in self.layers:
+        print(f"    DenseBlock input: {x.shape}")
+        for i, layer in enumerate(self.layers):
             out = layer(x)
+            print(f"    Layer {i} output: {out.shape}")
             x = torch.cat([x, out], dim=1)
+            print(f"    After concatenation: {x.shape}")
         return x
 
 
@@ -164,20 +236,25 @@ class MultiHeadAttention(nn.Module):
         self.query = nn.Conv2d(channels, channels, kernel_size=1)
         self.key = nn.Conv2d(channels, channels, kernel_size=1)
         self.value = nn.Conv2d(channels, channels, kernel_size=1)
-
         self.fc_out = nn.Conv2d(channels, channels, kernel_size=1)
 
     def forward(self, x):
+        print(f"  MultiHeadAttention input: {x.shape}")
         B, C, H, W = x.size()
+
         Q = self.query(x).view(B, self.num_heads, self.head_dim, H * W)
         K = self.key(x).view(B, self.num_heads, self.head_dim, H * W)
         V = self.value(x).view(B, self.num_heads, self.head_dim, H * W)
+        print(f"  Q, K, V shapes: {Q.shape}, {K.shape}, {V.shape}")
 
         energy = torch.einsum('bqhd,bkhd->bhqk', [Q, K])
+        print(f"  Energy shape: {energy.shape}")
         attention = torch.softmax(energy, dim=-1)
 
         out = torch.einsum('bhqk,bvhd->bhqd', [attention, V]).contiguous().view(B, C, H, W)
+        print(f"  Before fc_out: {out.shape}")
         out = self.fc_out(out)
+        print(f"  MultiHeadAttention output: {out.shape}")
         return out
 
 
@@ -185,63 +262,55 @@ class AFF(nn.Module):
     def __init__(self, channels, num_heads=8):
         super(AFF, self).__init__()
 
-        self.dense_block = DenseBlock(1024, 256, num_layers=3)
-
         self.local_att = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0),
+            nn.Conv2d(channels + 12 * channels, channels, kernel_size=1, stride=1, padding=0),
             nn.BatchNorm2d(channels),
             nn.ReLU(inplace=True),
             nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0)
         )
-        self.global_att = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0),
-            nn.BatchNorm2d(channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0)
-        )
-        self.sigmoid = nn.Sigmoid()
 
+        self.global_att = nn.Sequential(
+            nn.AdaptiveAvgPool2d((2, 2)),
+            nn.Conv2d(channels + 12 * channels, channels, kernel_size=1, stride=1, padding=0),
+            nn.BatchNorm2d(channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0)
+        )
+
+        self.upsample = nn.Upsample(size=(64, 64), mode='bilinear', align_corners=False)
+
+        self.sigmoid = nn.Sigmoid()
         self.multi_head_att = MultiHeadAttention(channels, num_heads)
 
-
-        self.channel_match = nn.Conv2d(1792, 1024, kernel_size=1)
-
     def forward(self, x1, x2):
-        print(f"x2 shape before unbind: {x2.shape}")
+        print(f"\n=== AFF (Attention Feature Fusion) ===")
+        print(f"x1 (optical) shape: {x1.shape}")
+        print(f"x2 (SAR) shape: {x2.shape}")
 
-        x2_split = torch.unbind(x2, dim=1)
+        batch_size, seq_len, channels, h, w = x2.size()
+        x2_concat = x2.view(batch_size, seq_len * channels, h, w)
+        print(f"x2 after concatenation: {x2_concat.shape}")
 
+        combined = torch.cat([x1, x2_concat], dim=1)
+        print(f"Combined features shape: {combined.shape}")
 
-        x2_processed = [self.dense_block(x) for x in x2_split]
-
-
-        x2_processed = torch.stack(x2_processed, dim=1)
-
-        print(f"x2_processed shape after DenseBlock: {x2_processed.shape}")
-
-        x2_processed = x2_processed.view(-1, 1792, 2, 2)
-
-        print(f"x2_processed shape after view: {x2_processed.shape}")
-
-        x2_processed = self.channel_match(x2_processed)
-
-        print(f"x2_processed shape after channel matching: {x2_processed.shape}")
-        xl = x1 + x2_processed
-        xl = self.local_att(xl)
+        xl = self.local_att(combined)
+        print(f"xl after local attention: {xl.shape}")
         xl = self.sigmoid(xl)
-        xg = x1 + x2_processed
-        xg = self.global_att(xg)
+
+        xg = self.global_att(combined)
+        print(f"xg after global attention: {xg.shape}")
         xg = self.sigmoid(xg)
 
+        xg = self.upsample(xg)
+        print(f"xg after upsampling: {xg.shape}")
 
-        xo = x1 * xl + x2_processed * (1 - xl) + x1 * xg + x2_processed * (1 - xg)
-
+        xo = x1 * xl + x1 * xg
+        print(f"xo after fusion: {xo.shape}")
 
         xo = self.multi_head_att(xo)
-
+        print(f"AFF output: {xo.shape}")
         return xo
-
 
 class UNetDecoderBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -251,35 +320,42 @@ class UNetDecoderBlock(nn.Module):
         self.conv2 = DepthwiseSeparableConv(out_channels, out_channels, kernel_size=3, padding=1)
 
     def forward(self, x, skip_connection):
+        print(f"UNetDecoderBlock - x: {x.shape}, skip: {skip_connection.shape}")
         x = self.upconv(x)
+        print(f"After upconv: {x.shape}")
         x = torch.cat([x, skip_connection], dim=1)
+        print(f"After concatenation: {x.shape}")
         x = F.relu(self.conv1(x))
+        print(f"After conv1 + relu: {x.shape}")
         x = F.relu(self.conv2(x))
+        print(f"After conv2 + relu: {x.shape}")
         return x
 
 
 class OpticalImageDecoderNetwork(nn.Module):
-    def __init__(self, in_channels=1024, out_channels=1):  #
+    def __init__(self, in_channels=1024, out_channels=1):
         super(OpticalImageDecoderNetwork, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels, 512, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(512, 256, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2d(256, 128, kernel_size=3, padding=1)
+        self.conv4 = nn.Conv2d(128, 64, kernel_size=3, padding=1)
+        self.final_conv = nn.Conv2d(64, out_channels, kernel_size=1)
 
-        self.decoder1 = UNetDecoderBlock(in_channels, 512)
-        self.decoder2 = UNetDecoderBlock(512 + 512, 256)  #
-        self.decoder3 = UNetDecoderBlock(256 + 256, 128)
-        self.decoder4 = UNetDecoderBlock(128 + 128, 64)
-        self.decoder5 = UNetDecoderBlock(64 + 64, 32)
+    def forward(self, x):
+        print(f"\n=== OpticalImageDecoderNetwork ===")
+        print(f"Decoder input: {x.shape}")
 
-        self.final_conv = nn.Conv2d(32, out_channels, kernel_size=1)
-
-    def forward(self, x, skips):
-
-        x = self.decoder1(x, skips[4])
-        x = self.decoder2(x, skips[3])
-        x = self.decoder3(x, skips[2])
-        x = self.decoder4(x, skips[1])
-        x = self.decoder5(x, skips[0])
-
+        x = F.relu(self.conv1(x))
+        print(f"After conv1: {x.shape}")
+        x = F.relu(self.conv2(x))
+        print(f"After conv2: {x.shape}")
+        x = F.relu(self.conv3(x))
+        print(f"After conv3: {x.shape}")
+        x = F.relu(self.conv4(x))
+        print(f"After conv4: {x.shape}")
 
         output = self.final_conv(x)
+        print(f"Final output: {output.shape}")
         return output
 
 
@@ -287,36 +363,47 @@ class FullOpticalImageClassificationModel(nn.Module):
     def __init__(self, in_channels=4, out_channels=1):
         super(FullOpticalImageClassificationModel, self).__init__()
 
-
         self.encoder = OpticalImageProcessingNetwork(in_channels=in_channels, out_channels=1024)
-
-
         self.aff = AFF(channels=1024)
-
         self.sar_network = SARImageProcessingNetwork(in_channels=1, seq_len=12, out_channels=1024)
-
-
         self.decoder = OpticalImageDecoderNetwork(in_channels=1024, out_channels=out_channels)
 
     def forward(self, optical_images, sar_images):
+        print(f"\n{'=' * 50}")
+        print(f"=== FULL MODEL FORWARD PASS ===")
+        print(f"{'=' * 50}")
+        print(f"Input - Optical: {optical_images.shape}, SAR: {sar_images.shape}")
 
         optical_features = self.encoder(optical_images)
 
-
         sar_features = self.sar_network(sar_images)
-
 
         fused_features = self.aff(optical_features, sar_features)
 
+        classification_output = self.decoder(fused_features)
 
-        skips = [optical_features]
-        classification_output = self.decoder(fused_features, skips)
+        print(f"\n{'=' * 50}")
+        print(f"=== FINAL OUTPUT ===")
+        print(f"Classification output shape: {classification_output.shape}")
+        print(f"{'=' * 50}")
 
         return classification_output
 
-optical_images = torch.randn(1, 4, 64, 64)
-sar_images = torch.randn(1, 12, 1, 64, 64)
 
-model = FullOpticalImageClassificationModel(in_channels=4, out_channels=1)
-output = model(optical_images, sar_images)
-print(output.shape)
+if __name__ == "__main__":
+    print("Creating test data...")
+    optical_images = torch.randn(10, 4, 64, 64)
+    sar_images = torch.randn(10, 12, 1, 64, 64)
+
+    print("Creating model...")
+    model = FullOpticalImageClassificationModel(in_channels=4, out_channels=7)
+
+    print("Running forward pass...")
+    try:
+        output = model(optical_images, sar_images)
+        print(f"\nSUCCESS! Final output shape: {output.shape}")
+    except Exception as e:
+        print(f"\nERROR occurred: {e}")
+        import traceback
+
+        traceback.print_exc()
