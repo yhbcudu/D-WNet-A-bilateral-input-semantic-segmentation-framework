@@ -57,5 +57,7 @@ Zaling Lake-Eling Lake Basin, Tibet
 
 ![image](https://github.com/user-attachments/assets/5667582b-eb06-471f-b327-a17ad055e536)
 
+Text data（Data acquisition （baidu））：
 
+![微信图片_20250617172258](https://github.com/user-attachments/assets/4bd6d455-edef-4978-ba8d-b58074875775)
 
