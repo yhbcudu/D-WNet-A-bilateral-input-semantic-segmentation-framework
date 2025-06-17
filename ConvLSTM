@@ -1,3 +1,31 @@
+class ConvLSTMCell(nn.Module):
+    def __init__(self, input_size, hidden_size, kernel_size=3):
+        super(ConvLSTMCell, self).__init__()
+        self.hidden_size = hidden_size
+        self.kernel_size = kernel_size
+        self.conv = nn.Conv2d(input_size + hidden_size, 4 * hidden_size, kernel_size=kernel_size, padding=1)
+
+    def forward(self, x, h_prev, c_prev):
+        print(f"    ConvLSTMCell - x: {x.shape}, h_prev: {h_prev.shape}, c_prev: {c_prev.shape}")
+        combined = torch.cat([x, h_prev], dim=1)
+        print(f"    Combined shape: {combined.shape}")
+        conv_output = self.conv(combined)
+        print(f"    Conv output shape: {conv_output.shape}")
+
+        i, f, o, g = torch.split(conv_output, self.hidden_size, dim=1)
+        print(f"    Split shapes - i: {i.shape}, f: {f.shape}, o: {o.shape}, g: {g.shape}")
+
+        i = torch.sigmoid(i)
+        f = torch.sigmoid(f)
+        o = torch.sigmoid(o)
+        g = torch.tanh(g)
+
+        c = f * c_prev + i * g
+        h = o * torch.tanh(c)
+        print(f"    Output - h: {h.shape}, c: {c.shape}")
+        return h, c
+
+
 class ConvLSTM(nn.Module):
     def __init__(self, input_channels, hidden_channels, kernel_size=3):
         super(ConvLSTM, self).__init__()
@@ -6,58 +34,96 @@ class ConvLSTM(nn.Module):
         self.cell = ConvLSTMCell(input_channels, hidden_channels, kernel_size)
 
     def forward(self, x):
+        print(f"  ConvLSTM input: {x.shape}")
         batch_size, seq_len, c, h, w = x.size()
+        print(f"  Batch: {batch_size}, Seq: {seq_len}, Channels: {c}, H: {h}, W: {w}")
+
         h_prev = torch.zeros(batch_size, self.hidden_channels, h, w).to(x.device)
         c_prev = torch.zeros(batch_size, self.hidden_channels, h, w).to(x.device)
+        print(f"  Initial hidden states - h_prev: {h_prev.shape}, c_prev: {c_prev.shape}")
 
         output_seq = []
         for t in range(seq_len):
+            print(f"  Processing timestep {t}")
             h_prev, c_prev = self.cell(x[:, t, :, :, :], h_prev, c_prev)
             output_seq.append(h_prev)
 
         output_seq = torch.stack(output_seq, dim=1)
+        print(f"  ConvLSTM output: {output_seq.shape}")
         return output_seq
 
 
-
-class ConvLSTMEncoderBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3):
-        super(ConvLSTMEncoderBlock, self).__init__()
+class SAREncoderBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, use_pooling=True, kernel_size=3):
+        super(SAREncoderBlock, self).__init__()
         self.conv_lstm = ConvLSTM(in_channels, out_channels, kernel_size)
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.use_pooling = use_pooling
+        if use_pooling:
+            self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
     def forward(self, x):
-
+        print(f"SAREncoderBlock input: {x.shape}")
         batch_size, seq_len, c, h, w = x.size()
-
+        print(f"Dimensions - Batch: {batch_size}, Seq: {seq_len}, Channels: {c}, H: {h}, W: {w}")
 
         x = self.conv_lstm(x)
+        print(f"After ConvLSTM: {x.shape}")
 
-        pooled_output = []
-        for t in range(seq_len):
-            pooled_output.append(self.pool(x[:, t, :, :, :]))
-
-        pooled_output = torch.stack(pooled_output, dim=1)
-
-        return pooled_output
-
+        if self.use_pooling:
+            pooled_output = []
+            for t in range(seq_len):
+                pooled = self.pool(x[:, t, :, :, :])
+                print(f"Timestep {t} after pooling: {pooled.shape}")
+                pooled_output.append(pooled)
+            pooled_output = torch.stack(pooled_output, dim=1)
+            print(f"SAREncoderBlock output: {pooled_output.shape}")
+            return pooled_output
+        else:
+            print(f"SAREncoderBlock output (no pooling): {x.shape}")
+            return x
 
 
 class SARImageProcessingNetwork(nn.Module):
     def __init__(self, in_channels=1, seq_len=12, out_channels=1024):
         super(SARImageProcessingNetwork, self).__init__()
+        # 只前两层使用池化，后面层保持尺寸
+        self.encoder1 = SAREncoderBlock(in_channels, 64, use_pooling=True)  # 64->32
+        self.encoder2 = SAREncoderBlock(64, 128, use_pooling=True)  # 32->16
+        self.encoder3 = SAREncoderBlock(128, 256, use_pooling=False)  # 16->16
+        self.encoder4 = SAREncoderBlock(256, 512, use_pooling=False)  # 16->16
+        self.encoder5 = SAREncoderBlock(512, out_channels, use_pooling=False)  # 16->16
 
-        self.encoder1 = ConvLSTMEncoderBlock(in_channels, 64)
-        self.encoder2 = ConvLSTMEncoderBlock(64, 128)
-        self.encoder3 = ConvLSTMEncoderBlock(128, 256)
-        self.encoder4 = ConvLSTMEncoderBlock(256, 512)
-        self.encoder5 = ConvLSTMEncoderBlock(512, out_channels)
+
+        self.upsample = nn.Upsample(size=(64, 64), mode='bilinear', align_corners=False)
 
     def forward(self, x):
+        print(f"\n=== SARImageProcessingNetwork ===")
+        print(f"Input to SAR network: {x.shape}")
+
+        print("\n--- SAR Encoder 1 ---")
         x = self.encoder1(x)
+
+        print("\n--- SAR Encoder 2 ---")
         x = self.encoder2(x)
+
+        print("\n--- SAR Encoder 3 ---")
         x = self.encoder3(x)
+
+        print("\n--- SAR Encoder 4 ---")
         x = self.encoder4(x)
+
+        print("\n--- SAR Encoder 5 ---")
         x = self.encoder5(x)
 
-        return x
+        print(f"Before upsample: {x.shape}")
+
+        batch_size, seq_len, channels, h, w = x.size()
+        upsampled_output = []
+        for t in range(seq_len):
+            upsampled = self.upsample(x[:, t, :, :, :])
+            print(f"Timestep {t} after upsample: {upsampled.shape}")
+            upsampled_output.append(upsampled)
+
+        upsampled_output = torch.stack(upsampled_output, dim=1)
+        print(f"SARImageProcessingNetwork output: {upsampled_output.shape}")
+        return upsampled_output
