@@ -44,58 +44,52 @@ class AFF(nn.Module):
     def __init__(self, channels, num_heads=8):
         super(AFF, self).__init__()
 
-        self.dense_block = DenseBlock(1024, 256, num_layers=3)
-
         self.local_att = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0),
+            nn.Conv2d(channels + 12 * channels, channels, kernel_size=1, stride=1, padding=0),
             nn.BatchNorm2d(channels),
             nn.ReLU(inplace=True),
             nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0)
         )
-        self.global_att = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0),
-            nn.BatchNorm2d(channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0)
-        )
-        self.sigmoid = nn.Sigmoid()
 
+        self.global_att = nn.Sequential(
+            nn.AdaptiveAvgPool2d((2, 2)),
+            nn.Conv2d(channels + 12 * channels, channels, kernel_size=1, stride=1, padding=0),
+            nn.BatchNorm2d(channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0)
+        )
+
+        self.upsample = nn.Upsample(size=(64, 64), mode='bilinear', align_corners=False)
+
+        self.sigmoid = nn.Sigmoid()
         self.multi_head_att = MultiHeadAttention(channels, num_heads)
 
-        self.channel_match = nn.Conv2d(1792, 1024, kernel_size=1)
-
     def forward(self, x1, x2):
-        print(f"x2 shape before unbind: {x2.shape}")
+        print(f"\n=== AFF (Attention Feature Fusion) ===")
+        print(f"x1 (optical) shape: {x1.shape}")
+        print(f"x2 (SAR) shape: {x2.shape}")
 
-        x2_split = torch.unbind(x2, dim=1)
+        batch_size, seq_len, channels, h, w = x2.size()
+        x2_concat = x2.view(batch_size, seq_len * channels, h, w)
+        print(f"x2 after concatenation: {x2_concat.shape}")
 
+        combined = torch.cat([x1, x2_concat], dim=1)
+        print(f"Combined features shape: {combined.shape}")
 
-        x2_processed = [self.dense_block(x) for x in x2_split]
-
-
-        x2_processed = torch.stack(x2_processed, dim=1)
-
-        print(f"x2_processed shape after DenseBlock: {x2_processed.shape}")
-
-        x2_processed = x2_processed.view(-1, 1792, 2, 2)
-
-        print(f"x2_processed shape after view: {x2_processed.shape}")
-
-        x2_processed = self.channel_match(x2_processed)
-
-        print(f"x2_processed shape after channel matching: {x2_processed.shape}")
-        xl = x1 + x2_processed
-        xl = self.local_att(xl)
+        xl = self.local_att(combined)
+        print(f"xl after local attention: {xl.shape}")
         xl = self.sigmoid(xl)
-        xg = x1 + x2_processed
-        xg = self.global_att(xg)
+
+        xg = self.global_att(combined)
+        print(f"xg after global attention: {xg.shape}")
         xg = self.sigmoid(xg)
 
+        xg = self.upsample(xg)
+        print(f"xg after upsampling: {xg.shape}")
 
-        xo = x1 * xl + x2_processed * (1 - xl) + x1 * xg + x2_processed * (1 - xg)
-
+        xo = x1 * xl + x1 * xg
+        print(f"xo after fusion: {xo.shape}")
 
         xo = self.multi_head_att(xo)
-
+        print(f"AFF output: {xo.shape}")
         return xo
