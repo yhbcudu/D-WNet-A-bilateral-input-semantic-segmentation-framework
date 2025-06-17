@@ -51,21 +51,10 @@ The D-WNet model has shown significant improvements in classification accuracy, 
 
 In this task, you can first use the data file to load the data. datacut is used to load the chunked data, while dataend is used to load the data for window traversal. In the training process, the net model is loaded for training, where EFF, DSC, and ConvLSTM are essential modules in the model.
 
-Methods	OA(%)	Kappa
-		
-UNet(Opt)	74.34	0.6921
-L-UNet(Opt)	80.25	0.7635
-UNet3+(Opt)	81.74	0.7808
-Unet(SAR)	68.14	6177
-ConvLSTM(SAR)	71.15	0.6538
-L-UNet(SAR)	74.23	0.6302
-UNet3+(SAR)	75.76	0.7091
-ConcatenationNet	69.59	0.7551
-FeatureWeightNet	76.55	0.7192
-WeightedVoteNet	71.74	0.7889
-CrossAttentionNet	79.21	0.8174
-KCCA	79.14	0.7737
-D-WNet	86.58	0.8292
+
+
+Zaling Lake-Eling Lake Basin, Tibet
+
 ![image](https://github.com/user-attachments/assets/5667582b-eb06-471f-b327-a17ad055e536)
 
 
